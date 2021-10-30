@@ -21,7 +21,7 @@ using namespace std;
 void *SendFileName(void *ptr)
 {
     string str = *reinterpret_cast<string *>(ptr);
-    //deb(str);
+    deb(str);
 
     int network_socket;
 
@@ -69,7 +69,19 @@ void *SendFileName(void *ptr)
     ////////////////////////
 
     // Send data to the socket
-    send(network_socket, &str, sizeof(str), 0);
+    //send(network_socket, &str, sizeof(str), 0);
+    char buffer[256];
+    bzero(buffer, 256);
+    //fgets(buffer, 255, stdin);
+    //buffer = str.c_str();
+    strcpy(buffer, str.c_str());
+    int n = write(network_socket, buffer, strlen(buffer));
+    if (n < 0)
+    {
+        cout << "ERROR writing to socket" << endl;
+        exit(0);
+    }
+
     char server_reply[200];
     //Receive a reply from the server
     if (recv(network_socket, server_reply, 2000, 0) < 0)

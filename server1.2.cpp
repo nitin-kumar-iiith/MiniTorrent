@@ -130,6 +130,16 @@ int main()
         deb(serverStorage.__ss_padding);
         deb(serverStorage.ss_family);
         deb(addr_size);
+        char buffer[256];
+        bzero(buffer, 256);
+        int n = read(newSocket, buffer, 255);
+        if (n < 0)
+        {
+            cout << "ERROR reading from socket";
+            exit(0);
+        }
+
+        printf("Here is the message: %s\n", buffer);
 
         /*recv(newSocket, &choices, 1000, 0);
         deb(newSocket);
@@ -143,7 +153,7 @@ int main()
         ///////////////////
         /////////////////
         // create the buffer with space for the data
-        const unsigned int MAX_BUF_LENGTH = 4096;
+        /*const unsigned int MAX_BUF_LENGTH = 4096;
         vector<char> buffer(MAX_BUF_LENGTH);
         string rcv;
         rcv.clear();
@@ -169,7 +179,7 @@ int main()
         deb(rcv);
         cout << endl
              << rcv << endl
-             << rcv.length();
+             << rcv.length();*/
         ///////////////////
         ////////////////////
         ///////////////////

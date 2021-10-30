@@ -16,6 +16,19 @@
 #include <string>
 #include <string>
 #include <vector>
+//From linux based file transfer for open files
+#include <bits/stdc++.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <grp.h>
+#include <pwd.h>
+#include <termios.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <ctime>
+
 using namespace std;
 #define MaxPendingConnection 100
 #define PORTNUM 8989
@@ -26,7 +39,15 @@ pthread_t tid;
 pthread_t writerthreads[100];
 pthread_t readerthreads[100];
 int readercount = 0;
-
+int serverSocket;
+void exit()
+{
+    close(serverSocket);
+}
+void init()
+{
+    atexit(exit);
+}
 // Reader Function
 void *reader(void *param)
 {
@@ -81,7 +102,8 @@ void *writer(void *param)
 int main()
 {
     // Initialize variables
-    int serverSocket, newSocket;
+    init();
+    int newSocket;
     struct sockaddr_in serverAddr;
     struct sockaddr_storage serverStorage;
 
@@ -122,63 +144,33 @@ int main()
         int choice = 0;
         //string choice;
         char choices;
-        //cout << serverStorage.ss_family << endl;
-        //cout << serverStorage.__ss_padding << endl;
-        //cout << serverStorage.__ss_align << endl;
-        //cout << addr_size << endl;
         deb(serverStorage.__ss_align);
         deb(serverStorage.__ss_padding);
         deb(serverStorage.ss_family);
         deb(addr_size);
-
-        /*recv(newSocket, &choices, 1000, 0);
-        deb(newSocket);
-        deb(choices);
-        string str = *reinterpret_cast<string *>(choices);
-        deb(str);*/
-        //giving segment fault
-
-        ///////////////////
-        ////////////////////
-        ///////////////////
-        /////////////////
-        // create the buffer with space for the data
-        const unsigned int MAX_BUF_LENGTH = 4096;
-        vector<char> buffer(MAX_BUF_LENGTH);
-        string rcv;
-        rcv.clear();
-        int bytesReceived = 0;
-        do
+        char buffer[256];
+        bzero(buffer, 256);
+        int n = read(newSocket, buffer, 255);
+        if (n < 0)
         {
-            bytesReceived = recv(newSocket, &buffer[0], buffer.size(), 0);
-            // append string from buffer.
-            if (bytesReceived == -1)
-            {
-                // error
-            }
-            else
-            {
-                //rcv.append(buffer.cbegin(), buffer.cend());
-                deb(buffer.size());
-                cout << (buffer.cend() - buffer.cbegin()) << endl;
-                rcv.append(buffer.cbegin(), buffer.cend());
-            }
-        } while (bytesReceived == MAX_BUF_LENGTH);
-        // At this point we have the available data (which may not be a complete
-        // application level message).
-        deb(rcv);
-        cout << endl
-             << rcv << endl
-             << rcv.length();
-        ///////////////////
-        ////////////////////
-        ///////////////////
-        /////////////////
+            cout << "ERROR reading from socket";
+            exit(0);
+        }
 
-        ///////////////////////////
-        ///////////////////////////
-        ////////////////////////
-        /////////////////////////////
+        printf("Here is the message: %s\n", buffer);
+
+        char b[1024];
+        int fin, fout, nread;
+        fin = open(buffer, O_RDONLY);
+        if (fin != 0)
+        {
+            cout << "File Open Failed";
+        }
+        while ((nread = read(fin, b, sizeof(b))) > 0)
+        {
+            //write(fout, b, nread);
+            write(newSocket, b, 200);
+        }
 
         //send(network_socket, &client_request, sizeof(client_request), 0);
         //write(client_sock , client_message , strlen(client_message));
@@ -193,6 +185,7 @@ int main()
             write(fout, b, nread);
         }
     */
+        //return 0;
         if (choice == 1)
         {
             // Creater readers thread
@@ -209,13 +202,11 @@ int main()
                 // Error in creating thread
                 printf("Failed to create thread\n");
         }
-
         //if (i >= 50)//original
         if (i >= MaxPendingConnection) //don't know why i added this
         {
             // Update i
             i = 0;
-
             //while (i < 50)//original
             while (i < MaxPendingConnection) //don't know why i added this
             {
@@ -226,11 +217,9 @@ int main()
                 pthread_join(writerthreads[i++], NULL);
                 pthread_join(readerthreads[i++], NULL);
             }
-
             // Update i
             i = 0;
         }
     }
-
     return 0;
 }

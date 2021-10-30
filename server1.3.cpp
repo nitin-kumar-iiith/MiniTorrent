@@ -16,6 +16,19 @@
 #include <string>
 #include <string>
 #include <vector>
+//From linux based file transfer for open files
+#include <bits/stdc++.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <grp.h>
+#include <pwd.h>
+#include <termios.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <ctime>
+
 using namespace std;
 #define MaxPendingConnection 100
 #define PORTNUM 8989
@@ -130,6 +143,29 @@ int main()
         deb(serverStorage.__ss_padding);
         deb(serverStorage.ss_family);
         deb(addr_size);
+        char buffer[256];
+        bzero(buffer, 256);
+        int n = read(newSocket, buffer, 255);
+        if (n < 0)
+        {
+            cout << "ERROR reading from socket";
+            exit(0);
+        }
+
+        printf("Here is the message: %s\n", buffer);
+
+        char b[1024];
+        int fin, fout, nread;
+        fin = open(buffer, O_RDONLY);
+        if (fin != 0)
+        {
+            cout << "File Open Failed";
+        }
+        while ((nread = read(fin, b, sizeof(b))) > 0)
+        {
+            //write(fout, b, nread);
+            write(newSocket, b, 200);
+        }
 
         /*recv(newSocket, &choices, 1000, 0);
         deb(newSocket);
@@ -143,7 +179,7 @@ int main()
         ///////////////////
         /////////////////
         // create the buffer with space for the data
-        const unsigned int MAX_BUF_LENGTH = 4096;
+        /*const unsigned int MAX_BUF_LENGTH = 4096;
         vector<char> buffer(MAX_BUF_LENGTH);
         string rcv;
         rcv.clear();
@@ -169,7 +205,7 @@ int main()
         deb(rcv);
         cout << endl
              << rcv << endl
-             << rcv.length();
+             << rcv.length();*/
         ///////////////////
         ////////////////////
         ///////////////////
