@@ -82,13 +82,13 @@ void init()
 }*/
 // Function to send data to
 // server socket.
-void *FileDownload(void *ptr)
+void *FileToDownload(void *ptr)
 {
     string str = *reinterpret_cast<string *>(ptr);
-    deb(str);
-
+    msg("File Name Recieved For Downloading:");
+    msg(str);
+    //deb(str);
     int network_socket;
-
     // Create a stream socket
     network_socket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -97,15 +97,13 @@ void *FileDownload(void *ptr)
     server_address.sin_family = AF_INET;
     server_address.sin_addr.s_addr = INADDR_ANY;
     server_address.sin_port = htons(PORTNUM); //recieve from this person
-
     // Initiate a socket connection
     int connection_status = connect(network_socket, (struct sockaddr *)&server_address, sizeof(server_address));
-
     // Check for connection error
     if (connection_status < 0)
     {
         //puts("Error\n");
-        msg("Error");
+        msg("Error: connect system call Failed");
         return 0;
     }
     else
@@ -114,45 +112,39 @@ void *FileDownload(void *ptr)
         msg("Connection estabilished");
     }
     deb(network_socket);
-    deb(str);
-
     // Send data to the socket
     //send(network_socket, &str, sizeof(str), 0);
     char buffer[MESSAGELEN + 10];
     bzero(buffer, MESSAGELEN);
-    //fgets(buffer, 255, stdin);
-    //buffer = str.c_str();
+    //tell other peer which file to download
     strcpy(buffer, str.c_str());
     int n = write(network_socket, buffer, strlen(buffer));
     if (n < 0)
     {
-        //cout << "ERROR writing to socket" << endl;
-        msg("ERROR writing to socket");
+        msg("ERROR: writing to socket failed");
         exit(0);
     }
-    //cout <<
-    msg("before first read");
+    //msg("Check Point:before first read");
     char server_reply[MESSAGELEN + 10];
     //Receive a reply from the server
-    if (recv(network_socket, server_reply, MESSAGELEN, 0) < 0)
-    {
-        puts("recv failed");
-        msg("recv failed");
-    }
-    else
-    {
-        //cout << "Recieved msg";
-        msg("Recieved msg");
-        deb(server_reply);
-    }
+    //if (recv(network_socket, server_reply, MESSAGELEN, 0) < 0)
+    //{
+    //msg("Recv failed");
+    //}
+    //else
+    //{
+    //msg("Recieved msg");
+    //deb(server_reply);
+    //}
     //cout << "outside msg";
-    msg("outside msg");
+    msg("Check Point:outside msg");
     string destn = "PQR.TXT";
+    str += "sdfgv";
     // Close the connection
     //int fin, fout, nread;
     //fout = open((destn).c_str(), O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
     ofstream myfile;
-    myfile.open("examples.txt", ios::out);
+    myfile.open(str.c_str(), ios::out);
     //myfile << "Writing this to a file.\n";
     //cout << "outside while true";
     msg("outside while true");
@@ -849,12 +841,62 @@ void *FileSendToPeer(void *ptr)
     int newSocket;
     struct sockaddr_in serverAddr;
     struct sockaddr_storage serverStorage;
-
+    int opt = 1;
     socklen_t addr_size;
     sem_init(&x, 0, 1);
     sem_init(&y, 0, 1);
 
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    // Forcefully attaching socket to the port 8080
+    if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
+                   &opt, sizeof(opt)))
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+
+    ////////////////////////////////
+    /*int server_fd, new_socket, valread;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+    char buffer[1024] = {0};
+    char *hello = "Hello from server";
+
+    // Creating socket file descriptor
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Forcefully attaching socket to the port 8080
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
+                   &opt, sizeof(opt)))
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    // Forcefully attaching socket to the port 8080
+    if (bind(server_fd, (struct sockaddr *)&address,
+             sizeof(address)) < 0)
+    {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+    if (listen(server_fd, 3) < 0)
+    {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }*/
+
+    /////////////////////////////////////
+
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(PORTNUM); //send from this port to peer
@@ -899,9 +941,9 @@ void *FileSendToPeer(void *ptr)
         deb(serverStorage.ss_family);
         deb(addr_size);
         //sent one test messages
-        string client_message = "abcAbCsbdoclsnfdcklsjdnckvh bsdlcv kl";
+        //string client_message = "abcAbCsbdoclsnfdcklsjdnckvh bsdlcv kl";
         //client_message.resize(MESSAGELEN, ' ');
-        write(newSocket, client_message.c_str(), MESSAGELEN);
+        //write(newSocket, client_message.c_str(), MESSAGELEN);
 
         char buffer[MESSAGELEN];
         bzero(buffer, MESSAGELEN);
@@ -999,12 +1041,16 @@ int main(int argc, char **argv)
     cin >> choice;
     if (choice == 1)
     {
-        fileName = "ABC.TXT";
-        pthread_create(&Recievertid, NULL, FileDownload, &fileName);
+        //listFiles();
+        cout << "Enter File Name to Download:" << endl;
+        cin >> fileName;
+        //fileName = "ABC.TXT";
+        pthread_create(&Recievertid, NULL, FileToDownload, &fileName);
     }
     else
     {
-        fileName = "ABC.TXT";
+
+        //fileName = "ABC.TXT";
         pthread_create(&Sendertid, NULL, FileSendToPeer, &fileName);
     }
     pthread_join(Sendertid, NULL);
