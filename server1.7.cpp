@@ -57,12 +57,12 @@ void init()
 
 void *reader(void *param)
 {
-    ;
+    return NULL;
 }
 
 void *writer(void *param)
 {
-    ;
+    return NULL;
 }
 
 // Driver Code

@@ -40,7 +40,7 @@ using namespace std;
 #define PORTNUM 8989
 #define MESSAGELEN 1024
 #define deb(x) cout << #x << " : " << x << endl
-#define msg(x) cout << x << endl
+#define msg(x) cout << x << endl;
 int portofTracker1;
 int portofTracker2;
 
@@ -208,11 +208,13 @@ void *createUser(void *ptr)
     string str = *reinterpret_cast<string *>(ptr);
     deb(str);
     string word = "";
+    string usedId, password;
     for (auto x : str)
     {
         if (x == ' ')
         {
             cout << word << endl;
+            usedId = word;
             word = "";
         }
         else
@@ -220,10 +222,88 @@ void *createUser(void *ptr)
             word = word + x;
         }
     }
+    password = word;
     cout << word << endl;
-    //Create_User newUser = *reinterpret_cast<Create_User *>(ptr);
-    //cout << (newUser.user) << endl;
-    //cout << (newUser.passwd) << endl;
+    ////////////////////////////////////////////////////
+    int network_socketForCreateUser;
+
+    // Create a stream socket
+    network_socketForCreateUser = socket(AF_INET, SOCK_STREAM, 0);
+
+    // Initialise port number and address
+    struct sockaddr_in server_address;
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(TRACKER1PORTNUM); //tracker's port number
+
+    // Initiate a socket connection
+    int connection_status = connect(network_socketForCreateUser, (struct sockaddr *)&server_address, sizeof(server_address));
+
+    // Check for connection error
+    if (connection_status < 0)
+    {
+        msg("Error");
+        return 0;
+    }
+    else
+    {
+        msg("Connection estabilished");
+    }
+    deb(network_socketForCreateUser);
+    // Send data to the socket
+    //send(network_socket, &str, sizeof(str), 0);
+    char buffer[MESSAGELEN + 10];
+    bzero(buffer, MESSAGELEN);
+    string commands = "create_user";
+    strcpy(buffer, commands.c_str());
+    int n = write(network_socketForCreateUser, buffer, strlen(buffer));
+    if (n < 0)
+    {
+        msg("ERROR writing CreateUser command to socket");
+        exit(0);
+    }
+    msg("before first read");
+    char server_reply[MESSAGELEN + 10];
+    //Receive a reply from the server
+    string reply = server_reply;
+    if (recv(network_socketForCreateUser, server_reply, MESSAGELEN, 0) < 0)
+    {
+        msg("recv failed");
+    }
+    else
+    {
+        msg("Recieved msg");
+        deb(server_reply);
+    }
+    if (strcmp(server_reply, "ok!") == 0)
+    {
+        strcpy(buffer, usedId.c_str());
+        n = write(network_socketForCreateUser, buffer, strlen(buffer));
+        if (n < 0)
+        {
+            msg("ERROR writing UserID in CreateUser command to socket");
+            exit(0);
+        }
+        strcpy(buffer, password.c_str());
+        n = write(network_socketForCreateUser, buffer, strlen(buffer));
+        if (n < 0)
+        {
+            msg("ERROR writing password in CreateUser command to socket");
+            exit(0);
+        }
+    }
+    else
+    {
+        cout << "reply == ok! is a false" << endl;
+        deb(reply);
+        deb(server_reply);
+    }
+    msg("outside msg");
+
+    // Close the connection
+    sleep(2000);
+    close(network_socketForCreateUser);
+    //////////////////////////////////////////////////////
     pthread_exit(NULL);
     return NULL;
 }
@@ -245,11 +325,6 @@ void getInput()
         string temp = to_string(user_id) + " " + passwd;
         //cout << temp;
         /////allocate space for string from heap then send
-
-        //Create_User *newUser = (Create_User *)malloc(sizeof(Create_User));
-        //newUser->passwd = passwd;
-        //newUser->user = user_id;
-        //pthread_create(&tid, NULL, createUser, &newUser);
         pthread_create(&handlingInputTid, NULL, createUser, &temp);
     }
     else if (imput == "login")
@@ -262,7 +337,7 @@ void getInput()
         string temp = to_string(user_id) + " " + passwd;
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, loginUser, &temp);
+        //pthread_create(&handlingInputTid, NULL, loginUser, &temp);
     }
     else if (imput == "create_group")
     { // d. Create Group: create_group <group_id>
@@ -272,7 +347,7 @@ void getInput()
         string temp = to_string(group_id);
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, createGroup, &temp);
+        //pthread_create(&handlingInputTid, NULL, createGroup, &temp);
     }
     else if (imput == "join_group")
     { // e. Join Group: join_group <group_id>
@@ -282,7 +357,7 @@ void getInput()
         string temp = to_string(group_id);
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, joinGroup, &temp);
+        //pthread_create(&handlingInputTid, NULL, joinGroup, &temp);
     }
     else if (imput == "leave_group")
     { // f. Leave Group: leave_group <group_id>
@@ -292,7 +367,7 @@ void getInput()
         string temp = to_string(group_id);
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, leaveGroup, &temp);
+        //pthread_create(&handlingInputTid, NULL, leaveGroup, &temp);
     }
     else if (imput == "list_requests")
     { // g. List pending join: list_requests <group_id>
@@ -302,7 +377,7 @@ void getInput()
         string temp = to_string(group_id);
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, listRequestGroup, &temp);
+        //pthread_create(&handlingInputTid, NULL, listRequestGroup, &temp);
     }
     else if (imput == "accept_request")
     { // h. Accept Group Joining Request: accept_request <group_id> <user_id>
@@ -316,7 +391,7 @@ void getInput()
         string temp = to_string(user_id) + " " + to_string(group_id);
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, acceptRequest, &temp);
+        //pthread_create(&handlingInputTid, NULL, acceptRequest, &temp);
     }
     else if (imput == "list_groups")
     { // i. List All Group In Network: list_groups
@@ -324,7 +399,7 @@ void getInput()
         string temp = " ";
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, listGroups, &temp);
+        //pthread_create(&handlingInputTid, NULL, listGroups, &temp);
     }
     else if (imput == "list_files")
     { // j. List All sharable Files In Group: list_files <group_id>
@@ -335,7 +410,7 @@ void getInput()
         string temp = to_string(group_id);
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, listFiles, &temp);
+        //pthread_create(&handlingInputTid, NULL, listFiles, &temp);
     }
     else if (imput == "upload_file")
     { // k. Upload File: upload_file <file_path> <group_id>
@@ -347,7 +422,7 @@ void getInput()
         string temp = to_string(group_id) + " " + file_path;
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, uploadFile, &temp);
+        //pthread_create(&handlingInputTid, NULL, uploadFile, &temp);
     }
     else if (imput == "download_file")
     { // l. Download File: download_file <group_id> <file_name> <destination_path>
@@ -361,14 +436,14 @@ void getInput()
         string temp = to_string(group_id) + " " + fileName + " " + dest_path;
         //cout << temp;
         /////allocate space for string from heap then send
-        pthread_create(&handlingInputTid, NULL, downloadFile, &temp);
+        //pthread_create(&handlingInputTid, NULL, downloadFile, &temp);
     }
     else if (imput == "logout")
     { // m. Logout: logout
         //can a client login to ultiple groups?
         int currentGroupID = 12323;
         string temp = to_string(currentGroupID);
-        pthread_create(&handlingInputTid, NULL, logOut, &temp);
+        //pthread_create(&handlingInputTid, NULL, logOut, &temp);
         //inform tracker that user in not available now
     }
     else if (imput == "show_downloads")
@@ -378,7 +453,8 @@ void getInput()
         // [D] [grp_id] filename
         // [C] [grp_id] filename
         // D(Downloading), C(Complete)
-        pthread_create(&handlingInputTid, NULL, showDownload, &temp);
+        string temp = " ";
+        //pthread_create(&handlingInputTid, NULL, showDownload, &temp);
         //thread needed because we want to continue previous download
         //meanwhile show the current download
         ;
@@ -387,7 +463,7 @@ void getInput()
     { // o. Stop sharing: stop_share <group_id> <file_name>
         int currentGroupID = 12323;
         string temp = to_string(currentGroupID);
-        pthread_create(&handlingInputTid, NULL, stopShare, &temp);
+        //pthread_create(&handlingInputTid, NULL, stopShare, &temp);
         //inform tracker that user in not sharing now
     }
     pthread_join(handlingInputTid, NULL);

@@ -1,4 +1,3 @@
-//tracker
 // inet_addr
 #include <arpa/inet.h>
 
@@ -35,14 +34,12 @@ unsigned int microseconds = 1000;
 
 using namespace std;
 #define MaxPendingConnection 100
-// #define TRACKER1PORTNUM 8787
-// #define TRACKER2PORTNUM 8788
-int TRACKER1PORTNUM; //1 means port number of self
-int MeraPortNumber;
-int TRACKER2PORTNUM; //2 means port number of other tracker
-int UskaPortNumber;
+#define TRACKER1PORTNUM 8787
+#define TRACKER2PORTNUM 8788
+#define PORTNUM 8989
 #define MESSAGELEN 1024
 #define deb(x) cout << #x << " : " << x << endl;
+#define msg(x) cout << x << endl;
 // Semaphore variables
 sem_t x, y;
 pthread_t tid;
@@ -58,44 +55,22 @@ void init()
 {
     atexit(exit);
 }
-// Reader Function
-void *connectToOtherThread(void *param)
+
+void *reader(void *param)
 {
-    string str = *reinterpret_cast<string *>(param);
     return NULL;
 }
 
-// Writer Function
 void *writer(void *param)
 {
     return NULL;
 }
 
 // Driver Code
-int main(int argc, char **argv)
+int main()
 {
     // Initialize variables
     init();
-    //int choice = atoi(argv[2]);
-    int choice = 1;
-    if (choice == 1)
-    {
-        MeraPortNumber = 8787;
-        UskaPortNumber = 8788;
-    }
-    else if (choice == 2)
-    {
-        MeraPortNumber = 8788;
-        UskaPortNumber = 8787;
-    }
-    string TrackerInfofilename = argv[1];
-    string command;
-    cin >> command;
-    if (command == "quit")
-    {
-        //inform other Tracker, Exiting/////////////////////
-        UskaPortNumber;
-    }
     int newSocket;
     struct sockaddr_in serverAddr;
     struct sockaddr_storage serverStorage;
@@ -107,33 +82,29 @@ int main(int argc, char **argv)
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(UskaPortNumber);
+    serverAddr.sin_port = htons(PORTNUM);
 
-    // Bind the socket to the address and port number.
+    // Bind the socket to the
+    // address and port number.
     bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
 
+    // Listen on the socket,
+    // with 40 max connection
+    // requests queued
+    //if (listen(serverSocket, 50) == 0)
     if (listen(serverSocket, MaxPendingConnection) == 0)
-    {
         printf("Listening\n");
-    }
     else
-    {
         printf("Error\n");
-    }
 
     // Array for thread
     pthread_t tid[60];
 
     int i = 0;
+
     while (1)
     {
         addr_size = sizeof(serverStorage);
-
-        //string fileName;
-        //const char *fileName = (char *)malloc(100);
-
-        //fileName = "IAmOtherTrackerJustStarted";
-        //pthread_create(&tid, NULL, connectToOtherThread, &fileName);
 
         // Extract the first
         // connection in the queue
@@ -146,9 +117,9 @@ int main(int argc, char **argv)
         deb(serverStorage.ss_family);
         deb(addr_size);
         //sent one test messages
-        //string client_message = "abcAbCsbdoclsnfdcklsjdnckvh bsdlcv kl";
+        string client_message = "abcAbCsbdoclsnfdcklsjdnckvh bsdlcv kl";
         //client_message.resize(MESSAGELEN, ' ');
-        //write(newSocket, client_message.c_str(), MESSAGELEN);
+        write(newSocket, client_message.c_str(), MESSAGELEN);
 
         char buffer[MESSAGELEN];
         bzero(buffer, MESSAGELEN);
@@ -159,7 +130,7 @@ int main(int argc, char **argv)
             exit(0);
         }
 
-        printf("Here is the message: %s\n", buffer); //identify command and call respective function using thread
+        printf("Here is the message: %s\n", buffer);
 
         //usleep(microseconds);
         char b[1024];
@@ -191,7 +162,7 @@ int main(int argc, char **argv)
         if (choice == 1)
         {
             // Creater readers thread
-            if (pthread_create(&readerthreads[i++], NULL, connectToOtherThread, &newSocket) != 0)
+            if (pthread_create(&readerthreads[i++], NULL, reader, &newSocket) != 0)
 
                 // Error in creating thread
                 printf("Failed to create thread\n");
