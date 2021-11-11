@@ -1,4 +1,7 @@
 #!/bin/bash
-g++ -pthread "server"$1".cpp" -o server;
-g++ -pthread "client"$1".cpp" -o client;
-g++ -pthread "tracker"$1".cpp" -o tracker
+#echo "Compiling: server"$1".cpp"
+#g++ -pthread "server"$1".cpp" -o server;
+echo "Compiling: client.cpp"
+g++ -pthread "client.cpp" -o client -pthread -lcrypto;
+echo "Compiling: tracker.cpp"
+g++ -pthread "tracker.cpp" -o tracker -pthread -lcrypto

@@ -1,0 +1,2220 @@
+#include <arpa/inet.h>
+
+// For threading, link with lpthread
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <iostream>
+#include <string.h>
+#include <string>
+#include <string>
+#include <vector>
+//From linux based file transfer for open files
+#include <bits/stdc++.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <grp.h>
+#include <pwd.h>
+#include <termios.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <ctime>
+
+//for sleep
+#include <unistd.h>
+
+unsigned int microseconds = 1000;
+
+using namespace std;
+#define MaxPendingConnection 100
+// #define TRACKER1PORTNUM 8787
+// #define TRACKER2PORTNUM 8788
+int myPortNum;
+vector<int> otherTrackerPortNum;
+int TRACKER1PORTNUM; //1 means port number of self
+int MeraPortNumber;
+int TRACKER2PORTNUM; //2 means port number of other tracker
+int UskaPortNumber;
+int IamtrackerNumber;
+#define MESSAGELEN 1024
+#define deb(x) cout << #x << " : " << x << endl;
+#define msg(x) cout << x << endl;
+// Semaphore variables
+sem_t x, y;
+pthread_t tid;
+pthread_t writerthreads[100];
+pthread_t readerthreads[100];
+int readercount = 0;
+int serverSocket;
+struct person //used to get authentication details from file
+{
+    int user;
+    char passwd[32];
+};
+struct Create_User
+{
+    int user;
+    string passwd;
+};
+struct groupOwners //used to get authentication details from file
+{
+    char usrId[64];
+    char grpId[64];
+};
+struct groupJoinRequests //used to get authentication details from file
+{
+    char grpId[32];
+    char usrIds[64];
+};
+struct FileGrpMember
+{
+    char GrpIDD[32];
+    char usrIDD[64];
+};
+struct Sha_Piece_Wise
+{
+    int pieceNum;
+    char sha_value[60];
+};
+struct Sha_Complete
+{
+    char FileName[60];
+    char sha_value[60];
+};
+///////////////
+struct Grp_Sharablefiles
+{
+    char FileNAme[100];
+    char GRpIDS[64];
+};
+struct FileUserID
+{
+    char fileName[32];
+    char assocaitedUserName[200];
+};
+///////////////
+struct grp_usr_file_active
+{
+    int active;
+    char grp_usr_file[60];
+};
+map<string, int> mapssharedFileinfo; //grpID + '_' + userId + '_' + filekanaam
+vector<Create_User> auth;
+map<int, string> authentication;
+map<int, int> mapUseridSendingPort; //checkinh avaliable or not
+map<string, string> infoFilessharing;
+//download file(if file owner has not left): mapCompletefileName_UserID using this get all
+//userIDs(say a) [These users can be in multiple(different also groups)]
+//if it is not empty then using mapGroupItsUsers & group ID get the userIDs in that group
+//(say b) now,( a intersection b ) are those people who in my group and have my requested
+//file .if it is not void then those set of people are in my group and have file also
+//so when a user leaves a group just remove his ID from the string given by "mapGroupItsUsers[groupID]"
+
+map<string, int> mapuserIDSharingFiles; /////before sending any one the port address from where to download
+//check if he is sharing the file or not
+map<string, string> mapCompletefileName_UserID;
+map<string, string> mapUserIDGroupID; //this user is owner of group
+map<string, string> mapGroupIDUserID; //this group is owned by this user
+map<string, string> mapGroupItsUsers; //this group has these many people(excluding admin)
+unordered_set<int> activeuser;
+map<string, string> groupMembers;
+map<string, string> mapPendingReqGroupIDUserIDs;
+map<string, string> mapGroupsSharableFiles; // tells group has which sharable files
+map<string, string> mapfilesDestination;    //which file is onn which location
+map<string, string> mapfileNameandSize;
+map<string, string> mapfileSHA1Complete; //SHA! of entire file
+map<string, vector<string>> mapfilePieceWiseSHA;
+map<string, string> notsharing_userID_FilenameGroupID; //a particular user ID is not sharing <file> in <group>
+void exit()
+{
+    close(serverSocket);
+}
+void init(int choice)
+{
+    if (choice == 1)
+    {
+        MeraPortNumber = 8787;
+        UskaPortNumber = 8788;
+    }
+    else if (choice == 2)
+    {
+        MeraPortNumber = 8788;
+        UskaPortNumber = 8787;
+    }
+    atexit(exit);
+}
+// Reader Function
+void *connectToOtherThread(void *param)
+{
+    string str = *reinterpret_cast<string *>(param);
+    return NULL;
+}
+
+// Writer Function
+void *writer(void *param)
+{
+    return NULL;
+}
+void getTrackerDetails(int argc, char **argv)
+{
+    //IP Format: ./tracker tracker_info.txt tracker_no
+    if (argc < 3)
+    {
+        msg("Insuffiecient Amount of parameter given, exiting");
+        exit(1);
+    }
+    fstream file;
+    string word, t, q, filename;
+    //string trackerFileName = "tracker_info.txt";
+    string trackerFileName = argv[1];
+    string temp = argv[2];
+    IamtrackerNumber = stoi(temp);
+    cout << "I am Tracker # " << IamtrackerNumber << endl;
+    file.open(trackerFileName.c_str());
+    int i = 0;
+    while (i < IamtrackerNumber)
+    {
+        if (file >> word)
+        {
+            if (i + 1 == IamtrackerNumber)
+            {
+                string temp = word;
+                myPortNum = stoi(temp);
+            }
+            else
+            {
+                string temp = word;
+                otherTrackerPortNum.push_back(stoi(temp));
+            }
+            i++;
+        }
+        else
+        {
+            break;
+        }
+    }
+    cout << "My Port Addr:" << myPortNum << endl;
+    file.close();
+}
+void *inputTake(void *ptr)
+{
+    string command;
+    cout << "Press <quit> to exit" << endl;
+    while (true)
+    {
+        cin >> command;
+        if (command == "quit")
+        {
+            close(serverSocket);
+            exit(0);
+        }
+        else
+        {
+            cout << "Invalid Command" << endl;
+        }
+    }
+    pthread_exit(NULL);
+    return NULL;
+}
+void *createUserFunction(void *ptr)
+{ //user may already exist
+    string str = (char *)ptr;
+    deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    //deb(socketaddr);
+    int newSocket = stoi(socketaddr);
+    cout << "\ncommand is create_user" << endl;
+    int j = i + 12 + 1;
+    string usrID;
+    string Pass_Wd;
+    for (; buffer[j] != ' '; j++)
+    {
+        usrID += buffer[j];
+    }
+    j++;
+    //deb(usrID);
+    for (; buffer[j]; j++)
+    {
+        Pass_Wd += buffer[j];
+    }
+    //deb(Pass_Wd);
+    string client_message;
+    Create_User newUser;
+    newUser.user = stoi(usrID);
+    newUser.passwd = Pass_Wd;
+    auth.push_back(newUser);
+    //user may already exist
+    //deb(usrID);
+    //deb(Pass_Wd);
+    FILE *outfile;
+    // open file for writing
+    outfile = fopen("person.dat", "a");
+    if (outfile == NULL)
+    {
+        fprintf(stderr, "\nError opened file\n");
+        exit(1);
+    }
+    struct person input;
+    // write struct to file
+    input.user = newUser.user;
+    strcpy(input.passwd, newUser.passwd.c_str());
+    fwrite(&input, sizeof(struct person), 1, outfile);
+    client_message = "Adding user UnSucessful";
+    if (fwrite != 0)
+    {
+        msg("Added user Sucessfully");
+        authentication[input.user] = input.passwd;
+        client_message = "Added user Sucessfully";
+    }
+    else
+    {
+        msg("error writing file !");
+    }
+    //////////////////////////inform user about status
+    write(newSocket, client_message.c_str(), MESSAGELEN);
+    //////////////////////////
+    fclose(outfile);
+    pthread_exit(NULL);
+    return NULL;
+}
+void *leaveGrpFunction(void *ptr)
+{
+    //if user is admin
+    //also remove shareable files of that user too
+    //goto <userID,associted grp> and remove entry
+    string str = (char *)ptr;
+    //deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    int newSocket = stoi(socketaddr);
+    cout << "\nCommand is leave_group" << endl;
+    int j = i + 12 + 1;
+    string grpID;
+    string usrID;
+    for (; buffer[j] != ' '; j++)
+    {
+        grpID += buffer[j];
+    }
+    deb(grpID);
+    j++; ////////////////////j++ was missing
+    for (; buffer[j]; j++)
+    {
+        usrID += buffer[j];
+    }
+    deb(usrID);
+    string allmemberofGrouup;
+    if (mapGroupItsUsers.find(grpID) == mapGroupItsUsers.end())
+    { //group not exists
+        string status = "group not exists";
+        write(newSocket, status.c_str(), MESSAGELEN);
+        pthread_exit(NULL);
+        return NULL;
+    }
+    else
+    { //group_exists
+        auto qtr = mapGroupItsUsers.find(grpID);
+        string grp_IDd = qtr->first;
+        //string grp_Member = qtr->second;
+        allmemberofGrouup = qtr->second;
+        deb(allmemberofGrouup);
+        ///////////////////////////////////////////////segment fault here
+        //remove "usrID" from allmemberofGrouup
+        bool found = false;
+        // Check if the word is present in string
+        // If found, remove it using removeAll()
+        if (allmemberofGrouup.find(usrID) != string::npos) //////segment fault
+        {
+            size_t p = -1;
+            string tempWord = usrID + " ";
+            while ((p = allmemberofGrouup.find(usrID)) != string::npos)
+            {
+                found = true;
+                allmemberofGrouup.replace(p, tempWord.length(), "");
+            }
+            tempWord = " " + usrID;
+            while ((p = allmemberofGrouup.find(usrID)) != string::npos)
+            {
+                found = true;
+                allmemberofGrouup.replace(p, tempWord.length(), "");
+            }
+        }
+        mapGroupItsUsers[grpID] = allmemberofGrouup;
+        string status;
+        if (found)
+        {
+            status = "user left Group";
+            deb(mapGroupItsUsers[grpID]);
+            write(newSocket, status.c_str(), MESSAGELEN);
+            string temps = mapGroupItsUsers[grpID];
+            //write to file also
+            //////
+            FILE *infile;
+            struct FileGrpMember mapGrpMembers;
+            infile = fopen("fileGroupMember.dat", "a");
+            if (infile == NULL)
+            {
+                msg("Error opening file <fileGroupMember.dat>");
+                pthread_exit(NULL);
+                return NULL;
+            }
+            bzero(mapGrpMembers.GrpIDD, 32);
+            bzero(mapGrpMembers.usrIDD, 64);
+            strcpy(mapGrpMembers.GrpIDD, grpID.c_str());
+            strcpy(mapGrpMembers.usrIDD, mapGroupItsUsers[grpID].c_str());
+            if (0 > (fwrite(&mapGrpMembers, sizeof(struct FileGrpMember), 1, infile)))
+            {
+                msg("Failed writting to file, about new grp members");
+            }
+            fclose(infile);
+        }
+        else
+        {
+            status = "user not part of group in first Place";
+            write(newSocket, status.c_str(), MESSAGELEN);
+        }
+    }
+    pthread_exit(NULL);
+    return NULL;
+}
+void *logoutFunction(void *ptr)
+{ //user may already exist
+    string str = (char *)ptr;
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    int newSocket = stoi(socketaddr);
+    cout << "Command is logout" << endl;
+    int j = i + 7 + 1;
+    string usrID;
+    for (; buffer[j]; j++)
+    {
+        usrID += buffer[j];
+    }
+    deb(usrID);
+    int userIDToLogout = stoi(usrID);
+    auto itr = activeuser.find(userIDToLogout);
+    string status;
+    if (itr != activeuser.end())
+    {
+        activeuser.erase(userIDToLogout);
+        auto jtr = activeuser.find(userIDToLogout);
+        mapuserIDSharingFiles[usrID] = 0;
+        if ((jtr == activeuser.end()) && (mapuserIDSharingFiles[usrID] == 0))
+        {
+            status = "user logged out";
+        }
+        else
+        {
+            status = "logout failed";
+        }
+    }
+    else if (itr == activeuser.end())
+    {
+        status = "user not logined in first Place";
+    }
+    // cout << "List of active user are :";
+    // for (auto jtr = activeuser.begin(); jtr != activeuser.end(); jtr++)
+    // {
+    //     cout << *jtr << " ";
+    // }
+    write(newSocket, status.c_str(), MESSAGELEN);
+    pthread_exit(NULL);
+    return NULL;
+}
+void *acceptRequestsFunction(void *ptr)
+{ //user may not have request pending
+    string str = (char *)ptr;
+    deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    int newSocket = stoi(socketaddr);
+    cout << "\nCommand is accept_request" << endl;
+    int j = i + 15 + 1;
+    string grpID;
+    string usrID;
+    for (; buffer[j] != ' '; j++)
+    {
+        grpID += buffer[j];
+    }
+    deb(grpID); //////////////////////////////////j++; missing
+    j++;
+    for (; buffer[j] != ' '; j++)
+    {
+        usrID += buffer[j];
+    }
+    deb(usrID);
+    j++;
+    string RequestSentBy;
+    for (; buffer[j]; j++)
+    {
+        RequestSentBy += buffer[j];
+    }
+    deb(RequestSentBy);
+    if (mapGroupIDUserID[grpID] != RequestSentBy)
+    {
+        string send_msg = "You Are Not Admin of Group";
+        write(newSocket, send_msg.c_str(), MESSAGELEN);
+        msg("Only Admin has the rights to Accept Request");
+        pthread_exit(NULL);
+        return NULL;
+    }
+    //You Are Not Admin of Group
+    string pendingRequestUsrIDs;
+    pendingRequestUsrIDs = mapPendingReqGroupIDUserIDs[grpID];
+    deb(pendingRequestUsrIDs);
+    bool found = false;
+    if (pendingRequestUsrIDs.find(usrID) != string::npos)
+    {
+        size_t p = -1;
+        string tempWord = usrID + " ";
+        while ((p = pendingRequestUsrIDs.find(usrID)) != string::npos)
+        {
+            found = true;
+            pendingRequestUsrIDs.replace(p, tempWord.length(), "");
+        }
+        tempWord = " " + usrID;
+        while ((p = pendingRequestUsrIDs.find(usrID)) != string::npos)
+        {
+            found = true;
+            pendingRequestUsrIDs.replace(p, tempWord.length(), "");
+        }
+    }
+    mapPendingReqGroupIDUserIDs[grpID] = pendingRequestUsrIDs;
+    // Return the resultant string
+    string status;
+    if (found)
+    {
+        status = "accepted";
+        //added error here
+        write(newSocket, status.c_str(), MESSAGELEN);
+        string temps = mapGroupItsUsers[grpID];
+        mapGroupItsUsers[grpID] = temps + " " + usrID;
+        cout << "Now the group Members are:" << temps + ' ' + usrID << endl;
+        ///////add it to file also
+        FILE *writeGroupItsUsers;
+        struct FileGrpMember mapGrpMembers;
+        writeGroupItsUsers = fopen("fileGroupMember.dat", "a");
+        if (writeGroupItsUsers == NULL)
+        {
+            fprintf(stderr, "\nError opening file <fileGroupMember.dat>\n");
+        }
+        strcpy(mapGrpMembers.GrpIDD, grpID.c_str());
+        strcpy(mapGrpMembers.usrIDD, mapGroupItsUsers[grpID].c_str());
+        //writeGroupItsUsers
+        if (0 > (fwrite(&mapGrpMembers, sizeof(struct FileGrpMember), 1, writeGroupItsUsers)))
+        {
+            msg("Failed writting to file, about new grp members");
+        }
+        fclose(writeGroupItsUsers);
+        ///////deleting the entry from file also
+        FILE *infile;
+        struct groupJoinRequests groupJoinRequeststemps;
+        vector<groupJoinRequests> infoHolder;
+        infile = fopen("groupRequest.dat", "r");
+        if (infile == NULL)
+        {
+            fprintf(stderr, "\nError opening file\n");
+            pthread_exit(NULL);
+            return NULL;
+        }
+        else
+        {
+            while (fread(&groupJoinRequeststemps, sizeof(struct groupJoinRequests), 1, infile))
+            {
+                infoHolder.push_back(groupJoinRequeststemps);
+                //string temp = mapPendingReqGroupIDUserIDs[groupJoinRequeststemp.grpId];
+                //mapPendingReqGroupIDUserIDs[groupJoinRequeststemp.grpId] = temp + ' ' + groupJoinRequeststemp.usrIds;
+                //mapPendingReqGroupIDUserIDs[groupJoinRequeststemps.grpId] = groupJoinRequeststemps.usrIds;
+            }
+            fclose(infile);
+            FILE *outfile;
+            outfile = fopen("groupRequest.dat", "w");
+            if (outfile == NULL)
+            {
+                fprintf(stderr, "\nError opening file\n");
+                pthread_exit(NULL);
+                return NULL;
+            }
+            for (unsigned int i = 0; i < infoHolder.size(); i++)
+            {
+                struct groupJoinRequests temp_s = infoHolder[i];
+                if (temp_s.grpId == grpID)
+                {
+                    strcpy(temp_s.usrIds, mapPendingReqGroupIDUserIDs[grpID].c_str());
+                }
+                fwrite(&temp_s, sizeof(struct groupJoinRequests), 1, outfile);
+            }
+            fclose(outfile);
+        }
+    }
+    else
+    {
+        status = "Request Not Found";
+        write(newSocket, status.c_str(), MESSAGELEN);
+    }
+    //////only grp owner should accept request
+    //update file also
+    //write info to file also(that accepted in which group)
+    deb(pendingRequestUsrIDs);
+    pthread_exit(NULL);
+    return NULL;
+}
+void *listRequestsFunction(void *ptr)
+{ //user may already exist
+    //string str = *reinterpret_cast<string *>(ptr);
+    string str = (char *)ptr;
+    deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    //socketaddr = buffer;
+    //deb(socketaddr);
+    int newSocket = stoi(socketaddr);
+    /////////////////////////////////////
+    cout << "\nCommand is list_requests" << endl;
+    int j = i + 14 + 1;
+    string grpID;
+    for (; buffer[j]; j++)
+    {
+        grpID += buffer[j];
+    }
+    deb(grpID);
+    string usrIDsToSend;
+    usrIDsToSend = mapPendingReqGroupIDUserIDs[grpID];
+    /*for (auto itr = mapGroupIDUserID.begin(); itr != mapGroupIDUserID.end(); itr++)
+    {
+        grpIDsToSend += itr->first + " ";
+    }*/
+    deb(usrIDsToSend);
+    write(newSocket, usrIDsToSend.c_str(), MESSAGELEN);
+    pthread_exit(NULL);
+    return NULL;
+}
+void *listFilesFunction(void *ptr)
+{
+    string str = (char *)ptr;
+    deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    socketaddr = buffer;
+    //deb(socketaddr);
+    int newSocket = stoi(socketaddr);
+    int j = i + 11 + 1;
+    string grpID;
+    for (; buffer[j]; j++)
+    {
+        grpID += buffer[j];
+    }
+    /////////////////////////////////////
+    cout << "Command is list_files" << endl;
+    string FilesNamesToSend;
+    set<string> filename_to_send_if_found;
+    bool flag = false;
+    if (mapGroupsSharableFiles.find(grpID) != mapGroupsSharableFiles.end() && (mapGroupsSharableFiles[grpID] != ""))
+    {
+        string FilesNamesOfGrp = mapGroupsSharableFiles[grpID];
+        string UserIdsOfGrp = mapGroupItsUsers[grpID];
+        string wrod = "";
+        vector<string> userNamesInGrp;
+        vector<string> fileNamesInGrp;
+        for (unsigned int abcd = 0; abcd < FilesNamesOfGrp.length(); abcd++)
+        {
+            if (FilesNamesOfGrp[abcd] == ' ')
+            {
+                if (wrod != "")
+                {
+                    fileNamesInGrp.push_back(wrod);
+                }
+                wrod = "";
+            }
+            else
+            {
+                wrod += FilesNamesOfGrp[abcd];
+            }
+        }
+        if (wrod != "")
+        {
+            fileNamesInGrp.push_back(wrod);
+        }
+        ////////////////////
+        wrod = "";
+        for (unsigned int abcd = 0; abcd < UserIdsOfGrp.length(); abcd++)
+        {
+            if (UserIdsOfGrp[abcd] == ' ')
+            {
+                if (wrod != "")
+                {
+                    userNamesInGrp.push_back(wrod);
+                }
+                wrod = "";
+            }
+            else
+            {
+                wrod += UserIdsOfGrp[abcd];
+            }
+        }
+        if (wrod != "")
+        {
+            userNamesInGrp.push_back(wrod);
+        }
+        for (unsigned int i = 0; i < userNamesInGrp.size(); i++)
+        {
+
+            if (activeuser.find(stoi(userNamesInGrp[i])) != activeuser.end() && mapuserIDSharingFiles[userNamesInGrp[i]] == 1)
+            { //added condition of active or not
+                for (unsigned int j = 0; j < fileNamesInGrp.size(); j++)
+                {
+                    //mapssharedFileinsadffo;
+                    string tmphlder = grpID + '_' + userNamesInGrp[i] + '_' + fileNamesInGrp[j];
+                    if (mapssharedFileinfo.find(tmphlder) != mapssharedFileinfo.end())
+                    {
+                        if (mapssharedFileinfo[tmphlder] == 1)
+                        {
+
+                            filename_to_send_if_found.insert(fileNamesInGrp[j]);
+                            flag = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (flag == false)
+    {
+        FilesNamesToSend = "This Group Has No Files";
+    }
+    else
+    {
+        for (auto itptr = filename_to_send_if_found.begin(); itptr != filename_to_send_if_found.end(); itptr++)
+        {
+            FilesNamesToSend.append(*itptr);
+            FilesNamesToSend.append(" ");
+        }
+    }
+    deb(FilesNamesToSend);
+    write(newSocket, FilesNamesToSend.c_str(), MESSAGELEN);
+    pthread_exit(NULL);
+    return NULL;
+}
+/*
+void *listFilesFunction(void *ptr)
+{ //user may already exist
+    string str = (char *)ptr;
+    //deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    socketaddr = buffer;
+    int newSocket = stoi(socketaddr);
+    int j = i + 11 + 1;
+    string grpID;
+    for (; buffer[j]; j++)
+    {
+        grpID += buffer[j];
+    }
+    /////////////////////////////////////
+    cout << "Command is list_files" << endl;
+    string FilesNamesToSend;
+    vector<string> Sharable_file_names;
+    string FinalSharableFile;
+    if (mapGroupsSharableFiles.find(grpID) != mapGroupsSharableFiles.end() && (mapGroupsSharableFiles[grpID] != ""))
+    {
+        FilesNamesToSend = mapGroupsSharableFiles[grpID];
+        string wrod = "";
+        for (unsigned int q = 0; q < FilesNamesToSend.length(); q++)
+        {
+            if (FilesNamesToSend[q] == ' ')
+            {
+                if (wrod != "")
+                {
+                    Sharable_file_names.push_back(wrod);
+                }
+                wrod = "";
+            }
+            else
+            {
+                wrod += FilesNamesToSend[q];
+            }
+        }
+        if (wrod != "")
+        {
+            Sharable_file_names.push_back(wrod);
+        }
+        ///notsharing_userID_FilenameGroupID
+        vector<string> userIDthatHaveOurFile;
+        vector<string> memberOfOurGrp;
+
+        for (unsigned int l = 0; l < Sharable_file_names.size(); l++)
+        {
+            bool found = false;
+            string filenameToBeProcessed = Sharable_file_names[l];
+            vector<string> Potential_user_of_our_grp_with_file;
+            string Potential_user_of_our_grp_with_file_unprocessed = mapCompletefileName_UserID[filenameToBeProcessed];
+            string userwrod = "";
+            for (unsigned int qp = 0; qp < Potential_user_of_our_grp_with_file_unprocessed.length(); qp++)
+            {
+                if (FilesNamesToSend[qp] == ' ')
+                {
+                    if (userwrod != "")
+                    {
+                        Potential_user_of_our_grp_with_file.push_back(wrod);
+                    }
+                    userwrod = "";
+                }
+                else
+                {
+                    userwrod += FilesNamesToSend[qp];
+                }
+            }
+            if (userwrod != "")
+            {
+                Potential_user_of_our_grp_with_file.push_back(wrod);
+            }
+            for (unsigned int qwe = 0; qwe < Potential_user_of_our_grp_with_file.size(); qwe++)
+            {
+                string helpers = Potential_user_of_our_grp_with_file[qwe];
+                size_t pos1 = mapGroupIDUserID[grpID].find(helpers + ' ');
+                size_t pos2 = mapGroupIDUserID[grpID].find(' ' + helpers);
+                if ((pos1 != string::npos) || (pos2 != string::npos))
+                {
+                    if (mapuserIDSharingFiles[helpers] == 1)
+                    {
+                        if (activeuser.find(stoi(helpers)) != activeuser.end())
+                        {
+                            size_t pos3 = notsharing_userID_FilenameGroupID[helpers].find(filenameToBeProcessed + '_' + grpID + ' ');
+                            size_t pos4 = notsharing_userID_FilenameGroupID[helpers].find(' ' + filenameToBeProcessed + '_' + grpID);
+                            if ((pos3 == string::npos) && (pos3 == string::npos))
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (found)
+            {
+
+                FinalSharableFile.append(Sharable_file_names[l]);
+                FinalSharableFile.append(" ");
+            }
+        }
+    }
+    else
+    {
+        FinalSharableFile = "This Group Has No Files";
+    }
+    deb(FinalSharableFile);
+    write(newSocket, FinalSharableFile.c_str(), MESSAGELEN);
+    pthread_exit(NULL);
+    return NULL;
+}*/
+void *listGroupFunction(void *ptr)
+{ //user may already exist
+    string str = (char *)ptr;
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    socketaddr = buffer;
+    //deb(socketaddr);
+    int newSocket = stoi(socketaddr);
+    cout << "\nCommand is list_group" << endl;
+    string grpIDsToSend;
+    for (auto itr = mapGroupIDUserID.begin(); itr != mapGroupIDUserID.end(); itr++)
+    {
+        grpIDsToSend += itr->first + " ";
+    }
+    deb(grpIDsToSend);
+    write(newSocket, grpIDsToSend.c_str(), MESSAGELEN);
+    pthread_exit(NULL);
+    return NULL;
+}
+void *joinGroupFunction(void *ptr)
+{ //user may already member fo group
+    string str = (char *)ptr;
+    deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    //deb(socketaddr);
+    int newSocket = stoi(socketaddr);
+    /////////////////////////////////////
+    cout << "\nCommand is join_group" << endl;
+    int j = i + 11 + 1;
+    string grpID;
+    for (; buffer[j] != ' '; j++)
+    {
+        grpID += buffer[j];
+    }
+    deb(grpID);
+    string userId;
+    j++;
+    for (; buffer[j]; j++)
+    {
+        userId += buffer[j];
+    }
+    deb(userId);
+    struct groupJoinRequests groupJoinRequeststemp;
+    //is group me iss bande ka request pending hai
+    string temp = mapPendingReqGroupIDUserIDs[grpID];
+    temp = temp + ' ' + userId;
+    mapPendingReqGroupIDUserIDs[grpID] = temp;
+    //string allrequestuserIds = mapPendingReqGroupIDUserIDs[grpID];
+    //strcpy(groupJoinRequeststemp.usrIds, allrequestuserIds.c_str());
+    strcpy(groupJoinRequeststemp.usrIds, temp.c_str());
+    strcpy(groupJoinRequeststemp.grpId, grpID.c_str());
+    FILE *outfile;
+    outfile = fopen("groupRequest.dat", "a");
+    if (outfile == NULL)
+    {
+        fprintf(stderr, "\nError opened file\n");
+        //exit(1);
+    }
+    int k = fwrite(&groupJoinRequeststemp, sizeof(struct groupJoinRequests), 1, outfile);
+    if (k != 0)
+    {
+        msg("request Added");
+        string client_message = "Group join Request sent";
+        //client_message.resize(MESSAGELEN, ' ');
+        write(newSocket, client_message.c_str(), MESSAGELEN);
+    }
+    else
+    {
+        msg("error writing file !");
+    }
+    fclose(outfile);
+    pthread_exit(NULL);
+    return NULL;
+}
+void *createGroupFunction(void *ptr)
+{ //group may already exist
+
+    string str = (char *)ptr;
+    deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    //deb(socketaddr);
+    int newSocket = stoi(socketaddr);
+    /////////////////////////////////////
+    cout << "\ncommand is create group";
+    int j = i + 13 + 1;
+    string grpID;
+    for (; buffer[j] != ' '; j++)
+    {
+        grpID += buffer[j];
+    }
+    deb(grpID);
+    string userId;
+    j++;
+    for (; buffer[j]; j++)
+    {
+        userId += buffer[j];
+    }
+    deb(userId);
+    struct groupOwners pairuserGrp;
+    string existing_grps = mapUserIDGroupID[userId];
+    mapUserIDGroupID[userId] = existing_grps + ' ' + grpID; //a user can owner of multiple group
+    mapGroupIDUserID[grpID] = userId;                       //a group can be owned by one user
+    mapGroupItsUsers[grpID] = userId;                       //group owner is member of group
+    ///////////////////////writing group member s in file
+    FILE *writeGroupItsUsers;
+    struct FileGrpMember mapGrpMembers;
+    writeGroupItsUsers = fopen("fileGroupMember.dat", "a");
+    if (writeGroupItsUsers == NULL)
+    {
+        fprintf(stderr, "\nError opening file <fileGroupMember.dat>\n");
+    }
+    strcpy(mapGrpMembers.GrpIDD, grpID.c_str());
+    strcpy(mapGrpMembers.usrIDD, mapGroupItsUsers[grpID].c_str());
+    //writeGroupItsUsers
+    if (0 > (fwrite(&mapGrpMembers, sizeof(struct FileGrpMember), 1, writeGroupItsUsers)))
+    {
+        msg("Failed writting to file, about new grp members");
+    }
+    fclose(writeGroupItsUsers);
+    /////////////////////
+    strcpy(pairuserGrp.usrId, userId.c_str());
+    strcpy(pairuserGrp.grpId, grpID.c_str());
+    FILE *outfile;
+    outfile = fopen("groupOwner.dat", "a");
+    if (outfile == NULL)
+    {
+        fprintf(stderr, "\nError opened file\n");
+        exit(1);
+    }
+    int k = fwrite(&pairuserGrp, sizeof(struct groupOwners), 1, outfile);
+    if (k != 0)
+    {
+        msg("Added Group Sucessfully");
+        string client_message = "Group Created";
+        //client_message.resize(MESSAGELEN, ' ');
+        write(newSocket, client_message.c_str(), MESSAGELEN);
+    }
+    else
+    {
+        msg("error writing file !");
+    }
+    fclose(outfile);
+    pthread_exit(NULL);
+    return NULL;
+}
+void *uploadFileFunction(void *ptr)
+{ //File may already exist
+    string str = (char *)ptr;
+    //deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    int newSocket = stoi(socketaddr);
+    cout << "\nCommand is Upload file \n";
+    int j = i + 12 + 1;
+    string grpID;
+    for (; buffer[j] != ' '; j++)
+    {
+        grpID += buffer[j];
+    }
+    //deb(grpID);
+    string userId;
+    j++;
+    for (; buffer[j] != ' '; j++)
+    {
+        userId += buffer[j];
+    }
+    //deb(userId);
+    string filekanaam;
+    ///////////j++; missing
+    j++;
+    for (; buffer[j]; j++)
+    {
+        filekanaam += buffer[j];
+    }
+    //deb(filekanaam);
+    vector<string> pieceWise_SHA;
+    while (true)
+    {
+        bzero(buffer, MESSAGELEN);
+        int n = read(newSocket, buffer, MESSAGELEN);
+        if (n < 0)
+        {
+            cout << "ERROR reading userID from socket";
+            pthread_exit(NULL);
+            return NULL;
+        }
+        if (n == 0)
+        {
+            break;
+        }
+        else
+        {
+            if (strcmp(buffer, "End_Of_File") == 0)
+            {
+                break;
+            }
+            else
+            {
+                pieceWise_SHA.push_back(buffer);
+            }
+        }
+    }
+    //mapfilePieceWiseSHA[filekanaam] = pieceWise_SHA;
+    bzero(buffer, MESSAGELEN);
+    int n = read(newSocket, buffer, MESSAGELEN);
+    if (n < 0)
+    {
+        cout << "ERROR reading SHA of Entire File from socket";
+        pthread_exit(NULL);
+        return NULL;
+    }
+    else
+    {
+        struct Sha_Complete EntireFileSHa;
+        strcpy(EntireFileSHa.FileName, filekanaam.c_str());
+        strcpy(EntireFileSHa.sha_value, buffer);
+        cout << EntireFileSHa.FileName << " Has SHA1 as: \n"
+             << EntireFileSHa.sha_value << endl;
+        FILE *SHA_FILE_FULL;
+        SHA_FILE_FULL = fopen("FnameEntireSHA.dat", "a");
+        if (SHA_FILE_FULL == NULL)
+        {
+            msg("Unable to write Complete SHA on Tracker");
+            pthread_exit(NULL);
+            return NULL;
+        }
+        fwrite(&EntireFileSHa, sizeof(struct Sha_Complete), 1, SHA_FILE_FULL);
+        if (fwrite == 0)
+        {
+            msg("error writing file !");
+        }
+        fclose(SHA_FILE_FULL);
+        //mapfileSHA1Complete[filekanaam] = buffer;
+    }
+    ///////////////////////////////////////////
+    //storing piecewise Sha in file
+    string SHA_FIle_Name = filekanaam + '_' + grpID + ".dat";
+    FILE *SHA_FILE_PIECE;
+    SHA_FILE_PIECE = fopen(SHA_FIle_Name.c_str(), "w");
+    if (SHA_FILE_PIECE == NULL)
+    {
+        msg("Unable to write PieceWise SHA on Tracker");
+        pthread_exit(NULL);
+        return NULL;
+    }
+    else
+    {
+        for (unsigned int l = 0; l < pieceWise_SHA.size(); l++)
+        {
+
+            struct Sha_Piece_Wise temp_Sha_Holder;
+            temp_Sha_Holder.pieceNum = l + 1;
+            strcpy(temp_Sha_Holder.sha_value, pieceWise_SHA[l].c_str());
+            cout << temp_Sha_Holder.pieceNum << ":" << temp_Sha_Holder.sha_value << endl;
+            fwrite(&temp_Sha_Holder, sizeof(struct Sha_Piece_Wise), 1, SHA_FILE_PIECE);
+            if (fwrite == 0)
+            {
+                msg("error writing file !");
+            }
+        }
+    }
+    fclose(SHA_FILE_PIECE);
+    //////////////////////done
+
+    string temps_S = mapCompletefileName_UserID[filekanaam];
+    mapCompletefileName_UserID[filekanaam] = temps_S + ' ' + userId;
+    ////////////////////////////////////////////////
+    FILE *fileOwnerDAt;
+    struct FileUserID mapFileUsers;
+    strcpy(mapFileUsers.assocaitedUserName, mapCompletefileName_UserID[filekanaam].c_str());
+    strcpy(mapFileUsers.fileName, filekanaam.c_str());
+    fileOwnerDAt = fopen("fileOwner.dat", "a");
+    if (fileOwnerDAt == NULL)
+    {
+        fprintf(stderr, "\nError opening file\n");
+        pthread_exit(NULL);
+        return NULL;
+    }
+    if (0 < (fwrite(&mapFileUsers, sizeof(struct FileUserID), 1, fileOwnerDAt)))
+    {
+        ;
+    }
+    fclose(fileOwnerDAt);
+
+    /////////////////////////////////////////////////////
+    string files_GroupHas = mapGroupsSharableFiles[grpID];
+    mapGroupsSharableFiles[grpID] = files_GroupHas + ' ' + filekanaam; // tells group has which sharable files
+    //now writting this info to file
+    FILE *grpSharablefileDAt;
+    struct Grp_Sharablefiles mapGrpSharableFile;
+    bzero(mapGrpSharableFile.FileNAme, 100);
+    bzero(mapGrpSharableFile.GRpIDS, 64);
+    strcpy(mapGrpSharableFile.FileNAme, mapGroupsSharableFiles[grpID].c_str());
+    strcpy(mapGrpSharableFile.GRpIDS, grpID.c_str());
+    grpSharablefileDAt = fopen("GrpSharableFile.dat", "a");
+    if (grpSharablefileDAt == NULL)
+    {
+        msg("Error opening file");
+        pthread_exit(NULL);
+        return NULL;
+    }
+    if (0 < (fwrite(&mapGrpSharableFile, sizeof(struct Grp_Sharablefiles), 1, grpSharablefileDAt)))
+    {
+        deb(mapGrpSharableFile.GRpIDS);
+        deb(mapGrpSharableFile.FileNAme);
+    }
+    fclose(grpSharablefileDAt);
+
+    /////////////////////////////////////////////////////
+    //degugging all the info recieved
+    /*vector<string>
+        mapstr = mapfilePieceWiseSHA[filekanaam];
+    cout << "Piece wise Sha\n";
+    for (unsigned int i = 0; i < mapstr.size(); i++)
+    {
+        //cout << mapstr[i] << endl;
+        deb(mapstr[i]);
+    }
+    cout << "Entire SHA\n"
+         << mapfileSHA1Complete[filekanaam] << endl;*/
+    cout << "groupID: <" << grpID << "> Has Files\n";
+    cout << mapGroupsSharableFiles[grpID] << endl;
+    cout << "The file can be Downloaded from USER ID\n";
+    cout << mapCompletefileName_UserID[filekanaam] << endl;
+    /////////////////////////////////////////////////////////
+    struct grp_usr_file_active holder_infos;
+    holder_infos.active = 1;
+    string temp_helper = grpID + '_' + userId + '_' + filekanaam;
+    strcpy(holder_infos.grp_usr_file, temp_helper.c_str());
+    mapssharedFileinfo[temp_helper] = holder_infos.active;
+    ////////////////////////////
+    //stroing this info in file
+    FILE *MapGrpUsrSharabledfileInfoDAt;
+    MapGrpUsrSharabledfileInfoDAt = fopen("MapGrpUsrSharabledfileInfoDAt.dat", "a");
+    if (MapGrpUsrSharabledfileInfoDAt == NULL)
+    {
+        msg("Error opening file");
+        pthread_exit(NULL);
+        return NULL;
+    }
+    if (0 < (fwrite(&holder_infos, sizeof(struct grp_usr_file_active), 1, MapGrpUsrSharabledfileInfoDAt)))
+    {
+        ;
+    }
+    fclose(MapGrpUsrSharabledfileInfoDAt);
+    /////////////////////////////
+
+    pthread_exit(NULL);
+    return NULL;
+}
+void *StopShareFunction(void *ptr)
+{ //user may be sharing file at all
+    string str = (char *)ptr;
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    //deb(socketaddr);
+    int newSocket = stoi(socketaddr);
+    cout << "\nCommand is stopshare" << endl;
+    int j = i + 11 + 1;
+    string usrID;
+    string filesname;
+    string GrP_ID;
+    for (; buffer[j] != ' '; j++)
+    {
+        filesname += buffer[j];
+    }
+    deb(filesname);
+    j++;
+    for (; buffer[j] != ' '; j++)
+    {
+        GrP_ID += buffer[j];
+    }
+    deb(GrP_ID);
+    j++;
+    for (; buffer[j]; j++)
+    {
+        usrID += buffer[j];
+    }
+    deb(usrID);
+    string temps = GrP_ID + '_' + usrID + '_' + filesname;
+    string response;
+    if (mapssharedFileinfo.find(temps) != mapssharedFileinfo.end())
+    {
+        mapssharedFileinfo[temps] = 0;
+        if (mapssharedFileinfo[temps] == 0)
+        {
+            response = "Stopped Sharing";
+            struct grp_usr_file_active holder_infos;
+            holder_infos.active = 0;
+            strcpy(holder_infos.grp_usr_file, temps.c_str());
+            FILE *MapGrpUsrSharabledfileInfoDAt;
+            MapGrpUsrSharabledfileInfoDAt = fopen("MapGrpUsrSharabledfileInfoDAt.dat", "a");
+            if (MapGrpUsrSharabledfileInfoDAt == NULL)
+            {
+                msg("Error opening file");
+                pthread_exit(NULL);
+                return NULL;
+            }
+            if (0 < (fwrite(&holder_infos, sizeof(struct grp_usr_file_active), 1, MapGrpUsrSharabledfileInfoDAt)))
+            {
+                ;
+            }
+            fclose(MapGrpUsrSharabledfileInfoDAt);
+        }
+    }
+    else
+    {
+        response = "User was not Sharing";
+    }
+    write(newSocket, response.c_str(), MESSAGELEN);
+    pthread_exit(NULL);
+    return NULL;
+}
+void *loginUserFunction(void *ptr)
+{ //user may already exist
+    string str = (char *)ptr;
+    deb(str);
+    string socketaddr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    deb(buffer);
+    int i = 0;
+    for (; buffer[i] != ' '; i++)
+    {
+        socketaddr += buffer[i];
+    }
+    //deb(socketaddr);
+    int newSocket = stoi(socketaddr);
+    cout << "\nCommand is login" << endl;
+    int j = i + 6 + 1;
+    string usrID;
+    string Pass_Wd;
+    for (; buffer[j] != ' '; j++)
+    {
+        usrID += buffer[j];
+    }
+    //deb(usrID);
+    j++;
+    for (; buffer[j]; j++)
+    {
+        Pass_Wd += buffer[j];
+    }
+    //deb(Pass_Wd);
+
+    Create_User newUser;
+    newUser.user = stoi(usrID);
+    newUser.passwd = Pass_Wd;
+    bool loginSucess = false;
+    string client_message;
+    auto itr = authentication.find(newUser.user);
+    if (itr != authentication.end() && authentication[newUser.user] == Pass_Wd)
+    {
+        loginSucess = true;
+        msg("Login Sucess");
+        activeuser.insert(newUser.user);
+        mapuserIDSharingFiles[usrID] = 1; //////////when ever a user logins he is in sharing mode
+    }
+    else if (itr == authentication.end())
+    {
+        msg("User not created");
+        client_message = "User not created";
+        write(newSocket, client_message.c_str(), MESSAGELEN);
+    }
+    else if (itr != authentication.end())
+    {
+        msg("Wrong password");
+        //cout << " correct Pass :" << itr->second;
+        client_message = "Wrong password";
+        write(newSocket, client_message.c_str(), MESSAGELEN);
+    }
+    if (loginSucess)
+    {
+        client_message = "true";
+        write(newSocket, client_message.c_str(), MESSAGELEN);
+        bzero(buffer, MESSAGELEN);
+        int n = read(newSocket, buffer, MESSAGELEN);
+        if (n < 0)
+        {
+            cout << "ERROR reading sendingPortAddr from Peer";
+            exit(0);
+        }
+        cout << "\nRecieved userID: " << newUser.user << " On port# " << buffer << endl;
+        //we mapped userID on the port on which he is available
+        mapUseridSendingPort[newUser.user] = stoi(buffer);
+        ////////////////////////////////////////////////last changes were made here, so mistake can be here
+    }
+    pthread_exit(NULL);
+    return NULL;
+}
+void getAuthDetails()
+{
+    FILE *infile;
+    struct person input;
+    struct Create_User temp;
+    infile = fopen("person.dat", "r");
+    if (infile == NULL)
+    {
+        return;
+    }
+    while (fread(&input, sizeof(struct person), 1, infile))
+    {
+        temp.passwd = input.passwd;
+        temp.user = input.user;
+        auth.push_back(temp);
+    }
+    for (unsigned int i = 0; i < auth.size(); i++)
+    {
+        //cout << auth[i].user << endl
+        // << auth[i].passwd << endl;
+        authentication[auth[i].user] = auth[i].passwd;
+    }
+    fclose(infile);
+} /*
+void ReadFileOwnerMap()
+{
+    FILE *infile;
+    struct person input;
+    struct Create_User temp;
+    infile = fopen("fileOwner.dat", "r");
+    if (infile == NULL)
+    {
+        fprintf(stderr, "\nError opening file\n");
+        return;
+    }
+    while (fread(&input, sizeof(struct person), 1, infile))
+    {
+        temp.passwd = input.passwd;
+        temp.user = input.user;
+        auth.push_back(temp);
+    }
+    for (unsigned int i = 0; i < auth.size(); i++)
+    {
+        //cout << auth[i].user << endl
+        //     << auth[i].passwd << endl;
+        authentication[auth[i].user] = auth[i].passwd;
+    }
+    fclose(infile);
+}*/
+void *sendFileInfoForDownload_Single(void *ptr)
+{ //file may already exist
+    //string str = *reinterpret_cast<string *>(ptr);
+    string str = (char *)ptr;
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    strcpy(buffer, str.c_str());
+    int i = 0;
+    string portNum;
+    string filaname;
+    string grpIIDD;
+    string uuussrID;
+    int newSocket;
+    while (buffer[i] != ' ')
+    {
+        portNum += buffer[i];
+        i++;
+    }
+    newSocket = stoi(portNum);
+    i = i + 9 + 1;
+    while (buffer[i] != ' ')
+    {
+        filaname += buffer[i];
+        i++;
+    }
+    i++;
+    while (buffer[i] != ' ')
+    {
+        grpIIDD += buffer[i];
+        i++;
+    }
+    i++;
+    while (buffer[i])
+    {
+        uuussrID += buffer[i];
+        i++;
+    }
+    bzero(buffer, MESSAGELEN);
+    string userID_who_have_my_file = mapCompletefileName_UserID[filaname];
+    deb(userID_who_have_my_file);
+    string portAddr;
+    string word = "";
+    string temp;
+    for (auto x : userID_who_have_my_file)
+    {
+        if (x == ' ')
+        {
+            if (word != "")
+            {
+                if (activeuser.find(stoi(word)) != activeuser.end()) //active
+                {
+                    if (mapuserIDSharingFiles[word] == 1) //logined
+                    {
+                        string tempss = grpIIDD + '_' + word + '_' + filaname;
+                        if (mapssharedFileinfo[tempss] == 1) //sharing
+                        {
+                            temp = to_string(mapUseridSendingPort[stoi(word)]);
+                            if (temp != "")
+                                portAddr = portAddr + ' ' + temp;
+                        }
+                    }
+                }
+            }
+            word = "";
+        }
+        else
+        {
+            word = word + x;
+        }
+    }
+    if (word != "")
+    {
+        if (activeuser.find(stoi(word)) != activeuser.end()) //active
+        {
+            if (mapuserIDSharingFiles[word] == 1) //logined
+            {
+                string tempss = grpIIDD + '_' + word + '_' + filaname;
+                if (mapssharedFileinfo[tempss] == 1) //sharing
+                {
+                    temp = to_string(mapUseridSendingPort[stoi(word)]);
+                    if (temp != "")
+                        portAddr = portAddr + ' ' + temp;
+                }
+            }
+        }
+    }
+    if (portAddr != "")
+    {
+        write(newSocket, portAddr.c_str(), MESSAGELEN);
+    }
+    else
+    {
+        portAddr = "no_User_has_complete_file";
+        write(newSocket, portAddr.c_str(), MESSAGELEN);
+    }
+    ////////////////////////
+    bzero(buffer, MESSAGELEN);
+    int n = read(newSocket, buffer, MESSAGELEN);
+    if (n < 0)
+    {
+        ;
+    }
+    deb(buffer);
+    if (strcmp(buffer, "Download_sucess") == 0)
+    {
+        string temps_S = mapCompletefileName_UserID[filaname];
+        mapCompletefileName_UserID[filaname] = temps_S + ' ' + uuussrID;
+        ////////////////////////////////////////////////
+        FILE *fileOwnerDAt;
+        struct FileUserID mapFileUsers;
+        strcpy(mapFileUsers.assocaitedUserName, mapCompletefileName_UserID[filaname].c_str());
+        strcpy(mapFileUsers.fileName, filaname.c_str());
+        fileOwnerDAt = fopen("fileOwner.dat", "a");
+        if (fileOwnerDAt == NULL)
+        {
+            msg("Error opening file");
+            pthread_exit(NULL);
+            return NULL;
+        }
+        if (0 < (fwrite(&mapFileUsers, sizeof(struct FileUserID), 1, fileOwnerDAt)))
+        {
+            ;
+        }
+        fclose(fileOwnerDAt);
+
+        cout << "The file can be Downloaded from USER ID\n";
+        cout << mapCompletefileName_UserID[filaname] << endl;
+        /////////////////////////////////////////////////////////
+        struct grp_usr_file_active holder_infos;
+        holder_infos.active = 1;
+        string temp_helper = grpIIDD + '_' + uuussrID + '_' + filaname;
+        deb(temp_helper);
+        strcpy(holder_infos.grp_usr_file, temp_helper.c_str());
+        mapssharedFileinfo[temp_helper] = holder_infos.active;
+        ////////////////////////////
+        //stroing this info in file
+        FILE *MapGrpUsrSharabledfileInfoDAt;
+        MapGrpUsrSharabledfileInfoDAt = fopen("MapGrpUsrSharabledfileInfoDAt.dat", "a");
+        if (MapGrpUsrSharabledfileInfoDAt == NULL)
+        {
+            msg("Error opening file");
+            pthread_exit(NULL);
+            return NULL;
+        }
+        if (0 < (fwrite(&holder_infos, sizeof(struct grp_usr_file_active), 1, MapGrpUsrSharabledfileInfoDAt)))
+        {
+            ;
+        }
+        fclose(MapGrpUsrSharabledfileInfoDAt);
+    }
+    ////////////////////////////////////////////////last changes were made here, so mistake can be here
+    pthread_exit(NULL);
+    return NULL;
+}
+void *sendFileInfoForDownload_Multi(void *ptr)
+{ //user may already exist
+    string str = *reinterpret_cast<string *>(ptr);
+    int newSocket = stoi(str);
+    char buffer[MESSAGELEN];
+    bzero(buffer, MESSAGELEN);
+    cout << "command (Download_file)accepted waitng for ramining input\n";
+    string client_message = "ok! send fileName";
+    //client_message.resize(MESSAGELEN, ' ');
+    write(newSocket, client_message.c_str(), MESSAGELEN);
+    int n = read(newSocket, buffer, MESSAGELEN);
+    if (n < 0)
+    {
+        cout << "ERROR reading filename from socket";
+        exit(0);
+    }
+    string filename = buffer;
+    deb(filename);
+    string userID = mapCompletefileName_UserID[filename];
+    char userids[120];
+    strcpy(userids, mapCompletefileName_UserID[filename].c_str());
+    deb(userids);
+    deb(userID);
+    string portAddr;
+    string word;
+    string temp;
+    for (auto x : userID)
+    {
+        if (x == ' ')
+        {
+            if (word != "")
+            {
+                temp = to_string(mapUseridSendingPort[stoi(word)]);
+                //check active status here(sharing or not)
+                if (temp != "")
+                    //portAddr += temp; //pert address must be space seperated
+                    portAddr = portAddr + " " + temp; //pert address must be space seperated
+            }
+            word = "";
+        }
+        else
+        {
+            word = word + x;
+        }
+    }
+    if (word != "")
+    {
+        temp = to_string(mapUseridSendingPort[stoi(word)]);
+        if (temp != "")
+        {
+            portAddr = portAddr + " " + temp;
+        }
+        //portAddr += temp;
+    }
+    if (portAddr != "")
+    {
+        write(newSocket, portAddr.c_str(), MESSAGELEN);
+        string FIles_Size = mapfileNameandSize[filename];
+        deb(FIles_Size);
+        usleep(1000); //sleep added as reciever needs some time
+        //before acceptiong next value
+        write(newSocket, FIles_Size.c_str(), MESSAGELEN);
+    }
+    else
+    {
+        cout << "UserID is null, i.e no port has complete file";
+        //now look for user ID that have incomplete files
+    }
+    ////////////////////////////////////////////////last changes were made here, so mistake can be here
+    pthread_exit(NULL);
+    return NULL;
+}
+void ReadGroupMemberMap()
+{
+    FILE *infile;
+    struct FileGrpMember mapGrpMembers;
+    infile = fopen("fileGroupMember.dat", "r");
+    if (infile == NULL)
+    {
+        return;
+    }
+    while (fread(&mapGrpMembers, sizeof(struct FileGrpMember), 1, infile))
+    {
+        //cout << "FileName is:" << mapFileUsers.fileName << " is present with " << mapFileUsers.assocaitedUserName;
+        //string temps = mapGroupItsUsers[mapGrpMembers.GrpIDD];
+        //mapGroupItsUsers[mapGrpMembers.GrpIDD] = temps + ' ' + mapGrpMembers.usrIDD;
+        mapGroupItsUsers[mapGrpMembers.GrpIDD] = mapGrpMembers.usrIDD;
+    }
+    // for (auto itr = mapGroupItsUsers.begin(); itr != mapGroupItsUsers.end(); itr++)
+    // {
+    //     cout << "Grp ID " << itr->first << " has Members: " << itr->second << endl;
+    // }
+    fclose(infile);
+}
+void ReadFileOwnerMap()
+{
+    FILE *infile;
+    struct FileUserID mapFileUsers;
+    infile = fopen("fileOwner.dat", "r");
+    if (infile == NULL)
+    {
+        return;
+    }
+    while (fread(&mapFileUsers, sizeof(struct FileUserID), 1, infile))
+    {
+        //cout << "FileName is:" << mapFileUsers.fileName << " is present with " << mapFileUsers.assocaitedUserName;
+        mapCompletefileName_UserID[mapFileUsers.fileName] = mapFileUsers.assocaitedUserName;
+    }
+    // for (auto itr = mapCompletefileName_UserID.begin(); itr != mapCompletefileName_UserID.end(); itr++)
+    // {
+    //     cout << itr->first << " is present with " << itr->second << endl;
+    // }
+    fclose(infile);
+}
+
+void ReadGrpOwnerMap()
+{
+    FILE *infile;
+    struct groupOwners mapGroupUsers;
+    infile = fopen("groupOwner.dat", "r");
+    if (infile == NULL)
+    {
+        return;
+    }
+    while (fread(&mapGroupUsers, sizeof(struct groupOwners), 1, infile))
+    {
+        //cout << "FileName is:" << mapFileUsers.fileName << " is present with " << mapFileUsers.assocaitedUserName;
+        //mapCompletefileName_UserID[mapFileUsers.fileName] = mapFileUsers.assocaitedUserName;
+        string temp_sa = mapUserIDGroupID[mapGroupUsers.usrId];
+        mapUserIDGroupID[mapGroupUsers.usrId] = temp_sa + ' ' + mapGroupUsers.grpId;
+        //this user is owner of these groups
+        mapGroupIDUserID[mapGroupUsers.grpId] = mapGroupUsers.usrId;
+        //this group is owned by this user
+        ///wont it be +=
+    }
+    // for (auto itr = mapUserIDGroupID.begin(); itr != mapUserIDGroupID.end(); itr++)
+    // {
+    //     cout << "userID:" << itr->first << " is owner of groupID(s):" << itr->second << endl;
+    // }
+    // for (auto itr = mapGroupIDUserID.begin(); itr != mapGroupIDUserID.end(); itr++)
+    // {
+    //     cout << "groupID:" << itr->first << " is ownered by userID:" << itr->second << endl;
+    // }
+    fclose(infile);
+}
+void ReadMapGrpUsrSharabledfile()
+{
+    FILE *MapGrpUsrSharabledfileInfoDAt;
+    struct grp_usr_file_active holder_infos;
+    MapGrpUsrSharabledfileInfoDAt = fopen("MapGrpUsrSharabledfileInfoDAt.dat", "r");
+    if (MapGrpUsrSharabledfileInfoDAt == NULL)
+    {
+        return;
+    }
+    while (fread(&holder_infos, sizeof(struct grp_usr_file_active), 1, MapGrpUsrSharabledfileInfoDAt))
+    {
+        mapssharedFileinfo[holder_infos.grp_usr_file] = holder_infos.active;
+    }
+    // for (auto itr = mapssharedFileinfo.begin(); itr != mapssharedFileinfo.end(); itr++)
+    // {
+    //     cout << itr->first << " status :" << itr->second << endl;
+    // }
+    fclose(MapGrpUsrSharabledfileInfoDAt);
+}
+
+void ReadgrpSharablefileDAt()
+{
+    FILE *grpSharablefileDAt;
+    struct Grp_Sharablefiles mapGrpSharableFilesds;
+    grpSharablefileDAt = fopen("GrpSharableFile.dat", "r");
+    if (grpSharablefileDAt == NULL)
+    {
+        return;
+    }
+    while (fread(&mapGrpSharableFilesds, sizeof(struct Grp_Sharablefiles), 1, grpSharablefileDAt))
+    {
+        string temp1 = mapGrpSharableFilesds.GRpIDS;
+        string temp2 = mapGrpSharableFilesds.FileNAme;
+        //deb(temp1);
+        //deb(temp2);
+        mapGroupsSharableFiles[temp1] = temp2;
+    }
+    // for (auto itr = mapGroupsSharableFiles.begin(); itr != mapGroupsSharableFiles.end(); itr++)
+    // {
+    //     cout << itr->first << " has files :" << itr->second << endl;
+    // }
+    ////
+    fclose(grpSharablefileDAt);
+}
+/*
+
+*/
+void ReadGrpJoinRequestMap()
+{
+    FILE *infile;
+    struct groupJoinRequests groupJoinRequeststemp;
+    infile = fopen("groupRequest.dat", "r");
+    if (infile == NULL)
+    {
+        return;
+    }
+    while (fread(&groupJoinRequeststemp, sizeof(struct groupJoinRequests), 1, infile))
+    {
+        //string temp = mapPendingReqGroupIDUserIDs[groupJoinRequeststemp.grpId];
+        //mapPendingReqGroupIDUserIDs[groupJoinRequeststemp.grpId] = temp + ' ' + groupJoinRequeststemp.usrIds;
+        mapPendingReqGroupIDUserIDs[groupJoinRequeststemp.grpId] = groupJoinRequeststemp.usrIds;
+    }
+    // for (auto itr = mapPendingReqGroupIDUserIDs.begin(); itr != mapPendingReqGroupIDUserIDs.end(); itr++)
+    // {
+    //     cout << "groupID:" << itr->first << " is has request Pending from by userIDs:" << itr->second << endl;
+    // }
+    fclose(infile);
+}
+// Driver Code
+int main(int argc, char **argv)
+{
+    // Initialize variables
+    //init(stoi(argv[2]));
+    init(1);
+    getTrackerDetails(argc, argv);
+    getAuthDetails();
+    pthread_t handlinginputTake;
+    pthread_create(&handlinginputTake, NULL, inputTake, NULL);
+    ReadFileOwnerMap();
+    ReadGroupMemberMap();
+    ReadGrpOwnerMap();
+    ReadGrpJoinRequestMap();
+    ReadMapGrpUsrSharabledfile();
+    ReadgrpSharablefileDAt();
+    //////////////////////////setup connection
+    int newSocket;
+    struct sockaddr_in serverAddr;
+    struct sockaddr_storage serverStorage;
+
+    socklen_t addr_size;
+    sem_init(&x, 0, 1);
+    sem_init(&y, 0, 1);
+
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_family = AF_INET;
+    // Forcefully attaching socket to the port 8080
+    int opt = 1;
+    if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)))
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+    serverAddr.sin_port = htons(MeraPortNumber); //start server at this port
+    // Bind the socket to the address and port number.
+    int n = bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+    if (n < 0)
+    {
+        perror("bind");
+        exit(EXIT_FAILURE);
+    }
+    if (listen(serverSocket, MaxPendingConnection) == 0)
+    {
+        printf("Listening\n");
+    }
+    else
+    {
+        printf("Error\n");
+    }
+    // Array for thread
+    pthread_t tid[60];
+    pthread_t handlingCreateUser;
+    pthread_t handlingCreateGroup;
+    pthread_t handlingLoginUser;
+    pthread_t handlingDownloadUserFileInfo;
+    pthread_t handlingJoinGroup;
+    pthread_t handlingListGroup;
+    pthread_t handlingListRequests;
+    pthread_t handlingListFiles;
+    pthread_t handlingacceptRequests;
+    pthread_t handlinglogout;
+    pthread_t handlingleaveGrp;
+    pthread_t handlinguploadFile;
+    pthread_t handlingStopShare;
+    mapfileNameandSize["test.pdf"] = "19901641";
+    int i = 0;
+    while (1)
+    {
+        addr_size = sizeof(serverStorage);
+        //during file upload add this also
+        //string fileName;
+
+        //const char *fileName = (char *)malloc(100);
+
+        // Extract the first
+        // connection in the queue
+        newSocket = accept(serverSocket, (struct sockaddr *)&serverStorage, &addr_size);
+        int choice = 0;
+        //string choice;
+        char choices;
+        //deb(serverStorage.__ss_align);
+        //deb(serverStorage.__ss_padding);
+        //deb(serverStorage.ss_family);
+        //deb(addr_size);
+
+        char buffer[MESSAGELEN];
+        bzero(buffer, MESSAGELEN);
+        int n = read(newSocket, buffer, MESSAGELEN);
+        if (n < 0)
+        {
+            cout << "ERROR reading from socket";
+            exit(0);
+        }
+        string temp;
+        printf("=====================================\n");
+        printf("Command Recieved: %s\n", buffer); //identify command and call respective function using thread
+        bool createUserFlag = false;
+        bool loginUserFlag = false;
+        bool creategroupFlag = false;
+        bool joingroupFlag = false;
+        bool listgroupsFlag = false;
+        bool listrequestsFlag = false;
+        bool listfilesFlag = false;
+        bool acceptrequestsFlag = false;
+        bool logoutFlag = false;
+        bool leaveGrpFlag = false;
+        bool uploadFileFlag = false;
+        bool downloadFileInfoFlag = false;
+        bool stopShareFlag = false;
+
+        if (buffer[0] == 'c' && buffer[1] == 'r' && buffer[2] == 'e' && buffer[3] == 'a' && buffer[4] == 't' && buffer[5] == 'e' && buffer[6] == '_' && buffer[7] == 'g' && buffer[8] == 'r' && buffer[9] == 'o' && buffer[10] == 'u' && buffer[11] == 'p')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            //temp += ' ' + buffer;
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                pthread_create(&handlingCreateGroup, NULL, createGroupFunction, arr);
+                creategroupFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 'j' && buffer[1] == 'o' && buffer[2] == 'i' && buffer[3] == 'n' && buffer[4] == '_' && buffer[5] == 'g' && buffer[6] == 'r' && buffer[7] == 'o' && buffer[8] == 'u' && buffer[9] == 'p')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            //temp += ' ' + buffer;
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                pthread_create(&handlingJoinGroup, NULL, joinGroupFunction, arr);
+                joingroupFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 'l' && buffer[1] == 'i' && buffer[2] == 's' && buffer[3] == 't' && buffer[4] == '_' && buffer[5] == 'g' && buffer[6] == 'r' && buffer[7] == 'o' && buffer[8] == 'u' && buffer[9] == 'p' && buffer[10] == 's')
+        {
+            temp = to_string(newSocket) + '\0';
+            //deb(temp);
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                pthread_create(&handlingListGroup, NULL, listGroupFunction, arr);
+                listgroupsFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 'l' && buffer[1] == 'i' && buffer[2] == 's' && buffer[3] == 't' && buffer[4] == '_' && buffer[5] == 'r' && buffer[6] == 'e' && buffer[7] == 'q' && buffer[8] == 'u' && buffer[9] == 'e' && buffer[10] == 's' && buffer[11] == 't' && buffer[12] == 's')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            //temp += ' ' + buffer;
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                pthread_create(&handlingListRequests, NULL, listRequestsFunction, arr);
+                listrequestsFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 'l' && buffer[1] == 'i' && buffer[2] == 's' && buffer[3] == 't' && buffer[4] == '_' && buffer[5] == 'f' && buffer[6] == 'i' && buffer[7] == 'l' && buffer[8] == 'e' && buffer[9] == 's')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                pthread_create(&handlingListFiles, NULL, listFilesFunction, arr);
+                listfilesFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 'a' && buffer[1] == 'c' && buffer[2] == 'c' && buffer[3] == 'e' && buffer[4] == 'p' && buffer[5] == 't' && buffer[6] == '_' && buffer[7] == 'r' && buffer[8] == 'e' && buffer[9] == 'q' && buffer[10] == 'u' && buffer[11] == 'e' && buffer[12] == 's' && buffer[13] == 't')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            //temp += ' ' + buffer;
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                pthread_create(&handlingacceptRequests, NULL, acceptRequestsFunction, arr);
+                acceptrequestsFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 'l' && buffer[1] == 'o' && buffer[2] == 'g' && buffer[3] == 'o' && buffer[4] == 'u' && buffer[5] == 't')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            //temp += ' ' + buffer;
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                pthread_create(&handlinglogout, NULL, logoutFunction, arr);
+                logoutFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 'l' && buffer[1] == 'e' && buffer[2] == 'a' && buffer[3] == 'v' && buffer[4] == 'e' && buffer[5] == '_' && buffer[6] == 'g' && buffer[7] == 'r' && buffer[8] == 'o' && buffer[9] == 'u' && buffer[10] == 'p')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                pthread_create(&handlingleaveGrp, NULL, leaveGrpFunction, arr);
+                leaveGrpFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 'u' && buffer[1] == 'p' && buffer[2] == 'l' && buffer[3] == 'o' && buffer[4] == 'a' && buffer[5] == 'd' && buffer[6] == '_' && buffer[7] == 'f' && buffer[8] == 'i' && buffer[9] == 'l' && buffer[10] == 'e')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                //deb(temp);
+                pthread_create(&handlinguploadFile, NULL, uploadFileFunction, arr);
+                uploadFileFlag = true;
+                usleep(200);
+            }
+        }
+        /*else if (strcmp(buffer, "create_user") == 0)
+        {
+            string temp = to_string(newSocket);
+            pthread_create(&handlingCreateUser, NULL, createUserFunction, &temp);
+            createUserFlag = true;
+            //deb(auth[0].passwd);
+            //deb(auth[0].user);
+        }*/
+        else if (buffer[0] == 'c' && buffer[1] == 'r' && buffer[2] == 'e' && buffer[3] == 'a' && buffer[4] == 't' && buffer[5] == 'e' && buffer[6] == '_' && buffer[7] == 'u' && buffer[8] == 's' && buffer[9] == 'e' && buffer[10] == 'r')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                deb(temp);
+                pthread_create(&handlingCreateUser, NULL, createUserFunction, arr);
+                createUserFlag = true;
+                usleep(200);
+            }
+        }
+        /*else if (strcmp(buffer, "login") == 0)
+        {
+            loginUserFlag = true;
+            string temp = to_string(newSocket);
+            pthread_create(&handlingLoginUser, NULL, loginUserFunction, &temp);
+        }*/
+        else if (buffer[0] == 'l' && buffer[1] == 'o' && buffer[2] == 'g' && buffer[3] == 'i' && buffer[4] == 'n')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                deb(temp);
+                pthread_create(&handlingLoginUser, NULL, loginUserFunction, arr);
+                loginUserFlag = true;
+                usleep(200);
+            }
+        }
+        else if (buffer[0] == 's' && buffer[1] == 't' && buffer[2] == 'o' && buffer[3] == 'p' && buffer[4] == '_' && buffer[5] == 's' && buffer[6] == 'h' && buffer[7] == 'a' && buffer[8] == 'r' && buffer[9] == 'e')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                //deb(temp);
+                pthread_create(&handlingStopShare, NULL, StopShareFunction, arr);
+                stopShareFlag = true;
+                usleep(200);
+            }
+        }
+        //else if (strcmp(buffer, "downfile") == 0)
+        else if (buffer[0] == 'd' && buffer[1] == 'o' && buffer[2] == 'w' && buffer[3] == 'n' && buffer[4] == 'f' && buffer[5] == 'i' && buffer[6] == 'l' && buffer[7] == 'e')
+        {
+            temp = to_string(newSocket) + ' ' + buffer + '\0';
+            char *arr = (char *)malloc(sizeof(char) * temp.length());
+            if (arr == NULL)
+            {
+                cout << "Unable to allocate Suffiecient Memory" << endl;
+            }
+            else
+            {
+                strcpy(arr, temp.c_str());
+                deb(arr);
+                //pthread_create(&handlingDownloadUserFileInfo, NULL, sendFileInfoForDownload_Multi, &temp);
+                pthread_create(&handlingDownloadUserFileInfo, NULL, sendFileInfoForDownload_Single, arr);
+                downloadFileInfoFlag = true;
+                usleep(200);
+            }
+        }
+        else
+        {
+            msg("Command Not Found");
+        }
+        if (loginUserFlag == true)
+            pthread_join(handlingLoginUser, NULL);
+        if (createUserFlag == true)
+            pthread_join(handlingCreateUser, NULL);
+        if (downloadFileInfoFlag == true)
+            pthread_join(handlingDownloadUserFileInfo, NULL);
+        if (creategroupFlag == true)
+            pthread_join(handlingCreateGroup, NULL);
+        if (joingroupFlag == true)
+            pthread_join(handlingJoinGroup, NULL);
+        if (listgroupsFlag == true)
+            pthread_join(handlingListGroup, NULL);
+        if (listrequestsFlag == true)
+            pthread_join(handlingListRequests, NULL);
+        if (acceptrequestsFlag == true)
+            pthread_join(handlingacceptRequests, NULL);
+        if (logoutFlag == true)
+            pthread_join(handlinglogout, NULL);
+        if (leaveGrpFlag == true)
+            pthread_join(handlingleaveGrp, NULL);
+        if (uploadFileFlag == true)
+            pthread_join(handlinguploadFile, NULL);
+        if (listfilesFlag == true)
+            pthread_join(handlingListFiles, NULL);
+        if (stopShareFlag == true)
+            pthread_join(handlingStopShare, NULL);
+
+        if (choice == 1)
+        {
+            cout << "glt jagah aa gya mai bro";
+            if (pthread_create(&readerthreads[i++], NULL, connectToOtherThread, &newSocket) != 0)
+                printf("Failed to create thread\n");
+        }
+        else if (choice == 2)
+        {
+            cout << "glt jagah aa gya mai bro";
+            if (pthread_create(&writerthreads[i++], NULL, writer, &newSocket) != 0)
+                printf("Failed to create thread\n");
+        }
+        if (i >= MaxPendingConnection)
+        {
+
+            i = 0;
+            while (i < MaxPendingConnection)
+            {
+
+                pthread_join(writerthreads[i++], NULL);
+                pthread_join(readerthreads[i++], NULL);
+            }
+            i = 0;
+        }
+    }
+    return 0;
+}
